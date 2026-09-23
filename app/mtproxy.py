@@ -37,7 +37,7 @@ def _stats_connections(raw: str) -> int:
         "active_inbound_connections",
     )
     for key in preferred_keys:
-        match = re.search(rf"(?m)^\\s*{re.escape(key)}\\s+([0-9]+)\\s*$", raw)
+        match = re.search(rf"(?m)^\s*{re.escape(key)}\s+([0-9]+)\s*$", raw)
         if match:
             return int(match.group(1))
     return 0
