@@ -1,4 +1,5 @@
 from app.main import app, health
+from app.mtproxy import _stats_connections
 from app.security import (
     client_secret,
     generate_proxy_secret,
@@ -49,3 +50,12 @@ def test_application_import_and_routes():
     assert "/proxies/{proxy_id}/actions/{action}" in paths
     assert "/servers/{server_id}/diagnostics" in paths
     assert health()["ok"] is True
+
+
+def test_mtproxy_client_connection_parser_prefers_external_connections():
+    sample = """active_connections 65
+active_inbound_connections 1
+active_special_connections 2
+ext_connections 7
+"""
+    assert _stats_connections(sample) == 7
