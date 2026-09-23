@@ -67,12 +67,46 @@ async def bootstrap_server(server: Server) -> str:
         fi
 
         make -C {REMOTE_ROOT}/src/MTProxy clean >/dev/null 2>&1 || true
-        make -C {REMOTE_ROOT}/src/MTProxy -j"$(nproc)"
+        BUILD_JOBS="$(nproc)"
+        if [ "$BUILD_JOBS" -gt 4 ]; then BUILD_JOBS=4; fi
+        make -C {REMOTE_ROOT}/src/MTProxy -j"$BUILD_JOBS"
         install -m 0755 {REMOTE_ROOT}/src/MTProxy/objs/bin/mtproto-proxy {REMOTE_ROOT}/bin/mtproto-proxy
 
         curl -fsSL https://core.telegram.org/getProxySecret -o {REMOTE_ROOT}/data/proxy-secret
         curl -fsSL https://core.telegram.org/getProxyConfig -o {REMOTE_ROOT}/data/proxy-multi.conf
         chmod 0644 {REMOTE_ROOT}/data/proxy-secret {REMOTE_ROOT}/data/proxy-multi.conf
+
+        cat >${REMOTE_ROOT}/bin/refresh-upstream.sh <<'EOF'
+        #!/usr/bin/env bash
+        set -euo pipefail
+        ROOT="${REMOTE_ROOT}"
+        TMP_SECRET="$(mktemp)"
+        TMP_CONFIG="$(mktemp)"
+        trap 'rm -f "$TMP_SECRET" "$TMP_CONFIG"' EXIT
+
+        curl --retry 3 --retry-delay 2 -fsSL https://core.telegram.org/getProxySecret -o "$TMP_SECRET"
+        curl --retry 3 --retry-delay 2 -fsSL https://core.telegram.org/getProxyConfig -o "$TMP_CONFIG"
+
+        CHANGED=0
+        if ! cmp -s "$TMP_SECRET" "$ROOT/data/proxy-secret"; then
+          install -m 0644 "$TMP_SECRET" "$ROOT/data/proxy-secret"
+          CHANGED=1
+        fi
+        if ! cmp -s "$TMP_CONFIG" "$ROOT/data/proxy-multi.conf"; then
+          install -m 0644 "$TMP_CONFIG" "$ROOT/data/proxy-multi.conf"
+          CHANGED=1
+        fi
+
+        if [ "$CHANGED" -eq 1 ]; then
+          for SERVICE_FILE in /etc/systemd/system/tgproxy-*.service; do
+            [ -e "$SERVICE_FILE" ] || continue
+            UNIT="$(basename "$SERVICE_FILE")"
+            [ "$UNIT" = "tgproxy-config-update.service" ] && continue
+            systemctl try-restart "$UNIT" || true
+          done
+        fi
+        EOF
+        chmod 0755 ${REMOTE_ROOT}/bin/refresh-upstream.sh
 
         cat >/etc/systemd/system/tgproxy-config-update.service <<'EOF'
         [Unit]
@@ -82,8 +116,7 @@ async def bootstrap_server(server: Server) -> str:
 
         [Service]
         Type=oneshot
-        ExecStart=/usr/bin/curl -fsSL https://core.telegram.org/getProxySecret -o {REMOTE_ROOT}/data/proxy-secret
-        ExecStart=/usr/bin/curl -fsSL https://core.telegram.org/getProxyConfig -o {REMOTE_ROOT}/data/proxy-multi.conf
+        ExecStart=${REMOTE_ROOT}/bin/refresh-upstream.sh
         EOF
 
         cat >/etc/systemd/system/tgproxy-config-update.timer <<'EOF'
