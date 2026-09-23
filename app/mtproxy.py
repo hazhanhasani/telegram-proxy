@@ -28,14 +28,16 @@ def _unit_name(slug: str) -> str:
 
 
 def _stats_connections(raw: str) -> int:
-    patterns = [
-        r"active_connections\\s*[:\\t ]+([0-9]+)",
-        r"active connections\\s*[:\\t ]+([0-9]+)",
-        r"connections\\s*[:\\t ]+([0-9]+)",
-        r"active_special_connections\\s*[:\\t ]+([0-9]+)",
-    ]
-    for pattern in patterns:
-        match = re.search(pattern, raw, flags=re.IGNORECASE)
+    # ext_connections is incremented/decremented with external client
+    # connection lifecycle in Telegram's MTProxy source, so it is the
+    # closest available gauge for currently connected clients.
+    preferred_keys = (
+        "ext_connections",
+        "active_special_connections",
+        "active_inbound_connections",
+    )
+    for key in preferred_keys:
+        match = re.search(rf"(?m)^\\s*{re.escape(key)}\\s+([0-9]+)\\s*$", raw)
         if match:
             return int(match.group(1))
     return 0
