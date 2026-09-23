@@ -1,0 +1,13 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="dark"><title>{% block title %}{{ app_name }}{% endblock %}</title><link rel="stylesheet" href="{{ url_for('static', path='app.css') }}"></head>
+<body><div class="shell">
+<aside class="sidebar"><div class="brand"><div class="brand-mark">TP</div><div><strong>Telegram Proxy</strong><small>Control Center</small></div></div>
+<nav><a class="{{ 'active' if current_path == '/' else '' }}" href="/">داشبورد</a><a class="{{ 'active' if current_path.startswith('/servers') else '' }}" href="/servers">سرورها</a><a class="{{ 'active' if current_path.startswith('/proxies') else '' }}" href="/proxies">پروکسی‌ها</a><a class="{{ 'active' if current_path.startswith('/sponsors') else '' }}" href="/sponsors">اسپانسرها</a></nav>
+<form action="/logout" method="post" class="logout"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="btn ghost wide" type="submit">خروج از پنل</button></form></aside>
+<main class="main"><header class="topbar"><div><div class="eyebrow">MTProto Infrastructure</div><h1>{% block heading %}مرکز کنترل{% endblock %}</h1></div><div class="status-pill"><span></span> Control Plane</div></header>
+{% if flash %}<div class="alert {{ flash.kind }}">{{ flash.message }}</div>{% endif %}{% block content %}{% endblock %}</main></div>
+<script>
+document.querySelectorAll("[data-confirm]").forEach(el=>el.addEventListener("submit",e=>{if(!confirm(el.dataset.confirm))e.preventDefault()}));
+document.querySelectorAll("[data-copy]").forEach(button=>button.addEventListener("click",async()=>{await navigator.clipboard.writeText(button.dataset.copy);const old=button.textContent;button.textContent="کپی شد";setTimeout(()=>button.textContent=old,1200)}));
+</script></body></html>

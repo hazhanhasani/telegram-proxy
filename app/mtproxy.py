@@ -53,7 +53,7 @@ async def bootstrap_server(server: Server) -> str:
         fi
 
         apt-get update -y
-        apt-get install -y git curl ca-certificates build-essential libssl-dev zlib1g-dev xxd
+        apt-get install -y git curl ca-certificates build-essential libssl-dev zlib1g-dev
 
         install -d -m 0755 {REMOTE_ROOT}/src {REMOTE_ROOT}/bin {REMOTE_ROOT}/data
 
@@ -134,7 +134,7 @@ async def deploy_proxy(server: Server, proxy: Proxy, sponsor_tag: str = "") -> s
 
         [Service]
         Type=simple
-        ExecStart={REMOTE_ROOT}/bin/mtproto-proxy -u nobody -p {proxy.stats_port} -H {proxy.public_port} -S {raw_secret}{tag_arg} --aes-pwd {REMOTE_ROOT}/data/proxy-secret {REMOTE_ROOT}/data/proxy-multi.conf -M {proxy.workers}
+        WorkingDirectory={REMOTE_ROOT}\n        ExecStart={REMOTE_ROOT}/bin/mtproto-proxy -u nobody -p {proxy.stats_port} -H {proxy.public_port} --http-stats -S {raw_secret}{tag_arg} --aes-pwd {REMOTE_ROOT}/data/proxy-secret {REMOTE_ROOT}/data/proxy-multi.conf -M {proxy.workers}
         Restart=always
         RestartSec=3
         LimitNOFILE=1048576
@@ -203,7 +203,7 @@ async def proxy_status(server: Server, proxy: Proxy) -> ProxyStatus:
     command = (
         f"state=$(systemctl is-active {unit} 2>/dev/null || true); "
         "printf '%s\\n---STATS---\\n' \"$state\"; "
-        f"(wget -qO- --timeout=4 http://127.0.0.1:{proxy.stats_port}/stats 2>/dev/null || true)"
+        f"(curl -fsS --max-time 4 http://127.0.0.1:{proxy.stats_port}/stats 2>/dev/null || true)"
     )
     try:
         result = await run(server, command, timeout=12)
