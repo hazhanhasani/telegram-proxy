@@ -76,10 +76,10 @@ async def bootstrap_server(server: Server) -> str:
         curl -fsSL https://core.telegram.org/getProxyConfig -o {REMOTE_ROOT}/data/proxy-multi.conf
         chmod 0644 {REMOTE_ROOT}/data/proxy-secret {REMOTE_ROOT}/data/proxy-multi.conf
 
-        cat >${REMOTE_ROOT}/bin/refresh-upstream.sh <<'EOF'
+        cat >{REMOTE_ROOT}/bin/refresh-upstream.sh <<'EOF'
         #!/usr/bin/env bash
         set -euo pipefail
-        ROOT="${REMOTE_ROOT}"
+        ROOT="{REMOTE_ROOT}"
         TMP_SECRET="$(mktemp)"
         TMP_CONFIG="$(mktemp)"
         trap 'rm -f "$TMP_SECRET" "$TMP_CONFIG"' EXIT
@@ -106,7 +106,7 @@ async def bootstrap_server(server: Server) -> str:
           done
         fi
         EOF
-        chmod 0755 ${REMOTE_ROOT}/bin/refresh-upstream.sh
+        chmod 0755 {REMOTE_ROOT}/bin/refresh-upstream.sh
 
         cat >/etc/systemd/system/tgproxy-config-update.service <<'EOF'
         [Unit]
@@ -116,7 +116,7 @@ async def bootstrap_server(server: Server) -> str:
 
         [Service]
         Type=oneshot
-        ExecStart=${REMOTE_ROOT}/bin/refresh-upstream.sh
+        ExecStart={REMOTE_ROOT}/bin/refresh-upstream.sh
         EOF
 
         cat >/etc/systemd/system/tgproxy-config-update.timer <<'EOF'
