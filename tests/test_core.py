@@ -1,5 +1,8 @@
+import asyncio
+from types import SimpleNamespace
+
 from app.main import app, health
-from app.mtproxy import _stats_connections
+from app.mtproxy import _stats_connections, bootstrap_server
 from app.security import (
     client_secret,
     generate_proxy_secret,
@@ -59,3 +62,21 @@ active_special_connections 2
 ext_connections 7
 """
     assert _stats_connections(sample) == 7
+
+
+def test_bootstrap_script_uses_real_remote_paths(monkeypatch):
+    captured = {}
+
+    async def fake_run(server, command, timeout=None, root=True):
+        captured["command"] = command
+        return SimpleNamespace(exit_status=0, stdout="bootstrap-ok\n", stderr="")
+
+    monkeypatch.setattr("app.mtproxy.run", fake_run)
+    result = asyncio.run(bootstrap_server(SimpleNamespace()))
+    assert result == "bootstrap-ok"
+
+    script = captured["command"]
+    assert "$/opt/telegram-proxy-panel" not in script
+    assert "cat >/opt/telegram-proxy-panel/bin/refresh-upstream.sh" in script
+    assert "ExecStart=/opt/telegram-proxy-panel/bin/refresh-upstream.sh" in script
+    assert "systemctl try-restart" in script

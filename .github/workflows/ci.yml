@@ -1,10 +1,13 @@
 name: CI
+
 on:
   push:
     branches: ["main"]
   pull_request:
+
 permissions:
   contents: read
+
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -14,6 +17,15 @@ jobs:
         with:
           python-version: "3.13"
           cache: pip
-      - run: pip install -r requirements.txt
-      - run: python -m compileall -q app
-      - run: pytest -q
+      - name: Install Python dependencies
+        run: pip install -r requirements.txt
+      - name: Compile Python
+        run: python -m compileall -q app
+      - name: Run tests
+        run: pytest -q
+      - name: Validate Docker Compose
+        run: |
+          cp .env.example .env
+          docker compose config >/dev/null
+      - name: Build application image
+        run: docker build -t telegram-proxy-control:test .
