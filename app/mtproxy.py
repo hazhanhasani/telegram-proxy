@@ -218,3 +218,52 @@ async def proxy_status(server: Server, proxy: Proxy) -> ProxyStatus:
         raw_stats=stats.strip(),
         error=result.stderr.strip() if result.exit_status not in (0, 3) else "",
     )
+
+
+async def proxy_logs(server: Server, proxy: Proxy, lines: int = 200) -> str:
+    safe_lines = max(20, min(int(lines), 1000))
+    unit = _unit_name(proxy.slug)
+    result = await run(
+        server,
+        f"journalctl -u {unit} -n {safe_lines} --no-pager -o short-iso 2>&1 || true",
+        timeout=25,
+    )
+    output = (result.stdout + "\n" + result.stderr).strip()
+    try:
+        secret = decrypt_text(proxy.secret_enc)
+        if secret:
+            output = output.replace(secret, "[REDACTED_SECRET]")
+            output = output.replace("dd" + secret, "[REDACTED_SECRET]")
+    except Exception:
+        pass
+    return output or "No journal entries were returned."
+
+
+async def server_diagnostics(server: Server) -> str:
+    command = """set +e
+echo '=== SYSTEM ==='
+printf 'hostname: '; hostname
+printf 'kernel: '; uname -srmo
+printf 'uptime: '; uptime -p
+echo
+echo '=== CPU / LOAD ==='
+nproc 2>/dev/null | awk '{print "cpu_count: "$1}'
+cat /proc/loadavg 2>/dev/null || true
+echo
+echo '=== MEMORY ==='
+free -h 2>/dev/null || true
+echo
+echo '=== DISK ==='
+df -h / 2>/dev/null || true
+echo
+echo '=== MTPROXY SERVICES ==='
+systemctl --no-pager --plain list-units 'tgproxy-*.service' --all 2>/dev/null || true
+echo
+echo '=== LISTENING TCP PORTS ==='
+ss -lnt 2>/dev/null | head -80 || true
+echo
+echo '=== CONFIG TIMER ==='
+systemctl --no-pager status tgproxy-config-update.timer 2>/dev/null | head -30 || true
+"""
+    result = await run(server, command, timeout=30)
+    return (result.stdout + "\n" + result.stderr).strip()

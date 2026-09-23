@@ -43,4 +43,9 @@ def test_application_import_and_routes():
     assert "/servers" in paths
     assert "/proxies" in paths
     assert "/sponsors" in paths
+    assert "/proxies/{proxy_id}" in paths
+    assert "/proxies/{proxy_id}/update" in paths
+    assert "/proxies/{proxy_id}/rotate-secret" in paths
+    assert "/proxies/{proxy_id}/actions/{action}" in paths
+    assert "/servers/{server_id}/diagnostics" in paths
     assert health()["ok"] is True

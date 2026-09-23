@@ -1,0 +1,2 @@
+{% extends "base.html" %}{% block title %}Diagnostics · {{ server.name }}{% endblock %}{% block heading %}Diagnostics — {{ server.name }}{% endblock %}{% block content %}
+<section class="card"><div class="card-head"><div><div class="eyebrow">Remote Node</div><h2>{{ server.host }}</h2><p>System, resources, services and listening TCP ports.</p></div><a class="btn ghost" href="/servers">بازگشت</a></div><pre class="terminal">{{ diagnostics }}</pre></section>{% endblock %}

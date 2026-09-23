@@ -1,4 +1,41 @@
-{% extends "base.html" %}{% block title %}اسپانسرها | {{ app_name }}{% endblock %}{% block heading %}اسپانسر و Promoted Channel{% endblock %}{% block content %}
-<div class="grid two"><section class="card"><div class="card-head"><div><div class="eyebrow">Telegram Monetization</div><h2>افزودن اسپانسر</h2></div></div><form method="post" action="/sponsors" class="form-grid one"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><label>نام داخلی<input name="name" placeholder="Sponsor A" required></label><label>کانال تلگرام<input name="channel" placeholder="@yourchannel"></label><label>Proxy Tag<input class="mono" name="proxy_tag" minlength="32" maxlength="32" placeholder="32-character hex tag" required></label><button class="btn primary" type="submit">ثبت اسپانسر</button></form></section>
-<section class="card accent-card"><div class="eyebrow">Official Flow</div><h2>دریافت Proxy Tag</h2><ol class="steps"><li>در Telegram وارد <strong>@MTProxyBot</strong> شوید.</li><li>دستور <span class="mono">/newproxy</span> را اجرا و پروکسی را ثبت کنید.</li><li>Tag دریافتی را اینجا وارد کنید.</li><li>پنل آن را با آرگومان <span class="mono">-P</span> روی MTProxy اعمال می‌کند.</li></ol><p class="muted">نمایش کانال تبلیغی توسط Telegram انجام می‌شود؛ پنل فقط Tag رسمی را مدیریت می‌کند.</p></section></div>
-<section class="card"><div class="card-head"><div><div class="eyebrow">Sponsor Registry</div><h2>اسپانسرهای ثبت‌شده</h2></div></div>{% if sponsors %}<div class="table-wrap"><table><thead><tr><th>نام</th><th>کانال</th><th>Tag</th><th>پروکسی‌ها</th><th>عملیات</th></tr></thead><tbody>{% for sponsor in sponsors %}<tr><td><strong>{{ sponsor.name }}</strong></td><td>{{ sponsor.channel or '—' }}</td><td class="mono">{{ sponsor.proxy_tag }}</td><td>{{ sponsor.proxies|length }}</td><td><form method="post" action="/sponsors/{{ sponsor.id }}/delete" data-confirm="اسپانسر حذف شود؟"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="btn tiny danger">حذف</button></form></td></tr>{% endfor %}</tbody></table></div>{% else %}<div class="empty">اسپانسری ثبت نشده است.</div>{% endif %}</section>{% endblock %}
+{% extends "base.html" %}
+{% block title %}اسپانسرها | {{ app_name }}{% endblock %}
+{% block heading %}اسپانسر و Promoted Channel{% endblock %}
+{% block content %}
+<div class="grid two">
+  <section class="card"><div class="card-head"><div><div class="eyebrow">Promoted Channel</div><h2>افزودن اسپانسر</h2></div></div>
+    <form method="post" action="/sponsors" class="form-grid one"><input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <label>نام داخلی<input name="name" placeholder="Sponsor A" required></label>
+      <label>کانال تلگرام<input name="channel" placeholder="@yourchannel"></label>
+      <label>Proxy Tag<input class="mono" name="proxy_tag" minlength="32" maxlength="32" placeholder="32-character hex tag" required></label>
+      <button class="btn primary" type="submit">ثبت اسپانسر</button>
+    </form>
+  </section>
+  <section class="card accent-card"><div class="eyebrow">Official Flow</div><h2>Proxy Tag رسمی</h2>
+    <ol class="steps"><li>در Telegram وارد <strong>@MTProxyBot</strong> شوید.</li><li><span class="mono">/newproxy</span> را اجرا کنید.</li><li>Tag دریافتی را اینجا ثبت کنید.</li><li>پنل آن را با <span class="mono">-P</span> اعمال می‌کند.</li></ol>
+    <p class="muted">Promoted Channel توسط خود Telegram نمایش داده می‌شود.</p>
+  </section>
+</div>
+
+<section class="card"><div class="card-head"><div><div class="eyebrow">Sponsor Registry</div><h2>اسپانسرهای ثبت‌شده</h2></div></div>
+{% if sponsors %}<div class="sponsor-grid">
+{% for sponsor in sponsors %}
+  <article class="mini-card">
+    <form method="post" action="/sponsors/{{ sponsor.id }}/update" class="form-grid one">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <div class="row-between"><strong>{{ sponsor.name }}</strong><span class="badge {{ 'online' if sponsor.is_active else 'offline' }}">{{ 'active' if sponsor.is_active else 'disabled' }}</span></div>
+      <label>نام<input name="name" value="{{ sponsor.name }}" required></label>
+      <label>کانال<input name="channel" value="{{ sponsor.channel }}"></label>
+      <label>Proxy Tag<input class="mono" name="proxy_tag" value="{{ sponsor.proxy_tag }}" minlength="32" maxlength="32" required></label>
+      <label class="check"><input type="checkbox" name="is_active" value="1" {% if sponsor.is_active %}checked{% endif %}><span>قابل انتخاب برای Proxyهای جدید</span></label>
+      <small class="muted">{{ sponsor.proxies|length }} پروکسی متصل</small>
+      <button class="btn tiny primary" type="submit">ذخیره و اعمال Tag</button>
+    </form>
+    <form method="post" action="/sponsors/{{ sponsor.id }}/delete" data-confirm="اسپانسر حذف شود؟" class="danger-zone">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="btn tiny danger">حذف</button>
+    </form>
+  </article>
+{% endfor %}
+</div>{% else %}<div class="empty">اسپانسری ثبت نشده است.</div>{% endif %}
+</section>
+{% endblock %}

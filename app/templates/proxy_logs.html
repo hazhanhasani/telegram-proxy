@@ -1,0 +1,2 @@
+{% extends "base.html" %}{% block title %}Logs · {{ proxy.name }}{% endblock %}{% block heading %}Logs — {{ proxy.name }}{% endblock %}{% block content %}
+<section class="card"><div class="card-head"><div><div class="eyebrow">journalctl</div><h2>آخرین ۲۵۰ خط</h2><p>Secretهای شناخته‌شده قبل از نمایش Redact می‌شوند.</p></div><a class="btn ghost" href="/proxies/{{ proxy.id }}">بازگشت</a></div><pre class="terminal">{{ logs }}</pre></section>{% endblock %}

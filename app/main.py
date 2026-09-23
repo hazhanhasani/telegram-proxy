@@ -3,6 +3,7 @@ import io
 import re
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
+from secrets import compare_digest
 from urllib.parse import quote
 
 import qrcode
@@ -10,7 +11,7 @@ from fastapi import Depends, FastAPI, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload
 from starlette.middleware.sessions import SessionMiddleware
@@ -18,8 +19,9 @@ from starlette.middleware.sessions import SessionMiddleware
 from .config import settings
 from .database import SessionLocal, get_db, init_db
 from .models import AuditLog, Proxy, Server, Sponsor, User, utcnow
-from .mtproxy import action_proxy, bootstrap_server, delete_proxy, deploy_proxy, proxy_status
+from .mtproxy import action_proxy, bootstrap_server, delete_proxy, deploy_proxy, proxy_logs, proxy_status, server_diagnostics
 from .security import (
+    decrypt_text,
     encrypt_text,
     generate_csrf,
     generate_proxy_secret,
@@ -101,6 +103,24 @@ def audit(db: Session, request: Request | None, action: str, target_type: str = 
             ip_address=ip,
         )
     )
+
+
+
+def port_conflict(
+    db: Session,
+    server_id: int,
+    public_port: int,
+    stats_port: int,
+    exclude_proxy_id: int | None = None,
+) -> Proxy | None:
+    stmt = select(Proxy).where(Proxy.server_id == server_id)
+    if exclude_proxy_id is not None:
+        stmt = stmt.where(Proxy.id != exclude_proxy_id)
+    for item in db.scalars(stmt).all():
+        occupied = {item.public_port, item.stats_port}
+        if public_port in occupied or stats_port in occupied:
+            return item
+    return None
 
 
 def ensure_admin() -> None:
@@ -268,6 +288,12 @@ async def add_server(
     require_user(request, db)
     if auth_type not in {"password", "private_key"}:
         raise HTTPException(400, "Invalid auth type")
+    if not (1 <= ssh_port <= 65535):
+        flash(request, "پورت SSH نامعتبر است.", "danger")
+        return RedirectResponse("/servers", status_code=303)
+    if not name.strip() or not host.strip() or not ssh_user.strip():
+        flash(request, "نام، Host و کاربر SSH الزامی هستند.", "danger")
+        return RedirectResponse("/servers", status_code=303)
     server = Server(
         name=name.strip(),
         host=host.strip(),
@@ -337,6 +363,22 @@ async def bootstrap_node(server_id: int, request: Request, db: Session = Depends
     return RedirectResponse("/servers", status_code=303)
 
 
+@app.get("/servers/{server_id}/diagnostics", response_class=HTMLResponse)
+async def server_diagnostics_page(server_id: int, request: Request, db: Session = Depends(get_db)):
+    require_user(request, db)
+    server = db.get(Server, server_id)
+    if not server:
+        raise HTTPException(404)
+    try:
+        diagnostics = await server_diagnostics(server)
+    except Exception as exc:
+        diagnostics = f"Diagnostics failed: {exc}"
+    return templates.TemplateResponse(
+        "server_diagnostics.html",
+        context(request, server=server, diagnostics=diagnostics),
+    )
+
+
 @app.post("/servers/{server_id}/delete")
 async def remove_server(server_id: int, request: Request, db: Session = Depends(get_db)):
     await require_csrf(request)
@@ -389,6 +431,65 @@ async def add_sponsor(
     return RedirectResponse("/sponsors", status_code=303)
 
 
+@app.post("/sponsors/{sponsor_id}/update")
+async def update_sponsor(
+    sponsor_id: int,
+    request: Request,
+    name: str = Form(...),
+    channel: str = Form(""),
+    proxy_tag: str = Form(...),
+    is_active: str | None = Form(None),
+    db: Session = Depends(get_db),
+):
+    await require_csrf(request)
+    require_user(request, db)
+    sponsor = db.get(Sponsor, sponsor_id)
+    if not sponsor:
+        raise HTTPException(404)
+
+    tag = proxy_tag.strip().lower()
+    clean_name = name.strip()
+    if not clean_name or not validate_tag(tag):
+        flash(request, "نام اسپانسر یا Proxy Tag نامعتبر است.", "danger")
+        return RedirectResponse("/sponsors", status_code=303)
+
+    duplicate = db.scalar(
+        select(Sponsor).where(
+            Sponsor.id != sponsor.id,
+            or_(Sponsor.name == clean_name, Sponsor.proxy_tag == tag),
+        )
+    )
+    if duplicate:
+        flash(request, "نام یا Proxy Tag قبلاً ثبت شده است.", "danger")
+        return RedirectResponse("/sponsors", status_code=303)
+
+    old_tag = sponsor.proxy_tag
+    sponsor.name = clean_name
+    sponsor.channel = channel.strip()
+    sponsor.proxy_tag = tag
+    sponsor.is_active = bool(is_active)
+
+    failures: list[str] = []
+    if tag != old_tag:
+        for proxy in list(sponsor.proxies):
+            try:
+                await deploy_proxy(proxy.server, proxy, tag)
+                proxy.state = "online"
+                proxy.last_error = ""
+            except Exception as exc:
+                proxy.state = "error"
+                proxy.last_error = str(exc)[:2000]
+                failures.append(proxy.name)
+
+    audit(db, request, "sponsor.update", "sponsor", str(sponsor.id), sponsor.name)
+    db.commit()
+    if failures:
+        flash(request, "اسپانسر ذخیره شد، اما Redeploy برخی پروکسی‌ها ناموفق بود: " + "، ".join(failures), "warning")
+    else:
+        flash(request, "اسپانسر به‌روزرسانی شد و Tag جدید روی پروکسی‌های متصل اعمال شد.", "success")
+    return RedirectResponse("/sponsors", status_code=303)
+
+
 @app.post("/sponsors/{sponsor_id}/delete")
 async def remove_sponsor(sponsor_id: int, request: Request, db: Session = Depends(get_db)):
     await require_csrf(request)
@@ -417,7 +518,6 @@ def proxies_page(request: Request, db: Session = Depends(get_db)):
 
     link_map = {}
     for proxy in proxies:
-        from .security import decrypt_text
         try:
             link_map[proxy.id] = proxy_links(
                 proxy.public_host,
@@ -464,6 +564,14 @@ async def add_proxy(
     server = db.get(Server, server_id)
     if not server:
         raise HTTPException(404, "Server not found")
+    conflict = port_conflict(db, server.id, public_port, stats_port)
+    if conflict:
+        flash(
+            request,
+            f"پورت انتخابی با پروکسی «{conflict.name}» روی همین Node تداخل دارد.",
+            "danger",
+        )
+        return RedirectResponse("/proxies", status_code=303)
     sponsor = db.get(Sponsor, int(sponsor_id)) if sponsor_id else None
 
     proxy = Proxy(
@@ -502,7 +610,172 @@ async def add_proxy(
     return RedirectResponse("/proxies", status_code=303)
 
 
-@app.post("/proxies/{proxy_id}/{action}")
+@app.get("/proxies/{proxy_id}", response_class=HTMLResponse)
+def proxy_detail(proxy_id: int, request: Request, db: Session = Depends(get_db)):
+    require_user(request, db)
+    proxy = db.scalar(
+        select(Proxy)
+        .options(joinedload(Proxy.server), joinedload(Proxy.sponsor))
+        .where(Proxy.id == proxy_id)
+    )
+    if not proxy:
+        raise HTTPException(404)
+    sponsors = db.scalars(
+        select(Sponsor).where(Sponsor.is_active.is_(True)).order_by(Sponsor.name)
+    ).all()
+    links = proxy_links(
+        proxy.public_host,
+        proxy.public_port,
+        decrypt_text(proxy.secret_enc),
+        proxy.padding_enabled,
+    )
+    return templates.TemplateResponse(
+        "proxy_detail.html",
+        context(request, proxy=proxy, sponsors=sponsors, links=links),
+    )
+
+
+@app.post("/proxies/{proxy_id}/update")
+async def update_proxy(
+    proxy_id: int,
+    request: Request,
+    name: str = Form(...),
+    sponsor_id: str = Form(""),
+    public_host: str = Form(...),
+    public_port: int = Form(...),
+    stats_port: int = Form(...),
+    workers: int = Form(...),
+    padding_enabled: str | None = Form(None),
+    db: Session = Depends(get_db),
+):
+    await require_csrf(request)
+    require_user(request, db)
+    proxy = db.scalar(
+        select(Proxy)
+        .options(joinedload(Proxy.server), joinedload(Proxy.sponsor))
+        .where(Proxy.id == proxy_id)
+    )
+    if not proxy:
+        raise HTTPException(404)
+    if not name.strip() or not public_host.strip():
+        flash(request, "نام و Host عمومی الزامی هستند.", "danger")
+        return RedirectResponse(f"/proxies/{proxy_id}", status_code=303)
+    if not (1 <= public_port <= 65535 and 1 <= stats_port <= 65535 and public_port != stats_port):
+        flash(request, "پورت‌ها نامعتبر یا یکسان هستند.", "danger")
+        return RedirectResponse(f"/proxies/{proxy_id}", status_code=303)
+    if not (1 <= workers <= 64):
+        flash(request, "Workers باید بین ۱ تا ۶۴ باشد.", "danger")
+        return RedirectResponse(f"/proxies/{proxy_id}", status_code=303)
+
+    conflict = port_conflict(
+        db,
+        proxy.server_id,
+        public_port,
+        stats_port,
+        exclude_proxy_id=proxy.id,
+    )
+    if conflict:
+        flash(request, f"پورت با پروکسی «{conflict.name}» تداخل دارد.", "danger")
+        return RedirectResponse(f"/proxies/{proxy_id}", status_code=303)
+
+    sponsor = db.get(Sponsor, int(sponsor_id)) if sponsor_id else None
+    if sponsor_id and not sponsor:
+        flash(request, "اسپانسر انتخابی پیدا نشد.", "danger")
+        return RedirectResponse(f"/proxies/{proxy_id}", status_code=303)
+
+    old = {
+        "name": proxy.name,
+        "sponsor_id": proxy.sponsor_id,
+        "public_host": proxy.public_host,
+        "public_port": proxy.public_port,
+        "stats_port": proxy.stats_port,
+        "workers": proxy.workers,
+        "padding_enabled": proxy.padding_enabled,
+    }
+    proxy.name = name.strip()
+    proxy.sponsor_id = sponsor.id if sponsor else None
+    proxy.public_host = public_host.strip()
+    proxy.public_port = public_port
+    proxy.stats_port = stats_port
+    proxy.workers = workers
+    proxy.padding_enabled = bool(padding_enabled)
+
+    try:
+        await deploy_proxy(proxy.server, proxy, sponsor.proxy_tag if sponsor else "")
+        proxy.state = "online"
+        proxy.last_error = ""
+        proxy.last_checked = utcnow()
+        audit(db, request, "proxy.update", "proxy", str(proxy.id), proxy.slug)
+        db.commit()
+        flash(request, "تنظیمات ذخیره و سرویس Redeploy شد.", "success")
+    except Exception as exc:
+        for field, value in old.items():
+            setattr(proxy, field, value)
+        proxy.state = "error"
+        proxy.last_error = f"Update failed; desired changes were not saved: {exc}"[:2000]
+        audit(db, request, "proxy.update_failed", "proxy", str(proxy.id), str(exc))
+        db.commit()
+        flash(request, f"به‌روزرسانی ناموفق بود: {exc}", "danger")
+    return RedirectResponse(f"/proxies/{proxy_id}", status_code=303)
+
+
+@app.post("/proxies/{proxy_id}/rotate-secret")
+async def rotate_proxy_secret(proxy_id: int, request: Request, db: Session = Depends(get_db)):
+    await require_csrf(request)
+    require_user(request, db)
+    proxy = db.scalar(
+        select(Proxy)
+        .options(joinedload(Proxy.server), joinedload(Proxy.sponsor))
+        .where(Proxy.id == proxy_id)
+    )
+    if not proxy:
+        raise HTTPException(404)
+
+    old_secret_enc = proxy.secret_enc
+    proxy.secret_enc = encrypt_text(generate_proxy_secret())
+    try:
+        await deploy_proxy(proxy.server, proxy, proxy.sponsor.proxy_tag if proxy.sponsor else "")
+        proxy.state = "online"
+        proxy.last_error = ""
+        proxy.last_checked = utcnow()
+        audit(db, request, "proxy.rotate_secret", "proxy", str(proxy.id), proxy.slug)
+        db.commit()
+        flash(request, "Secret جدید ساخته و روی سرویس اعمال شد. لینک قبلی دیگر معتبر نیست.", "success")
+    except Exception as exc:
+        proxy.secret_enc = old_secret_enc
+        recovered = False
+        try:
+            await deploy_proxy(proxy.server, proxy, proxy.sponsor.proxy_tag if proxy.sponsor else "")
+            recovered = True
+        except Exception:
+            recovered = False
+        proxy.state = "online" if recovered else "error"
+        proxy.last_error = f"Secret rotation failed: {exc}"[:2000]
+        audit(db, request, "proxy.rotate_secret_failed", "proxy", str(proxy.id), str(exc))
+        db.commit()
+        flash(request, "Rotate ناموفق بود؛ Secret قبلی حفظ شد." if recovered else "Rotate ناموفق بود و بازیابی سرویس هم شکست خورد.", "danger")
+    return RedirectResponse(f"/proxies/{proxy_id}", status_code=303)
+
+
+@app.get("/proxies/{proxy_id}/logs", response_class=HTMLResponse)
+async def proxy_logs_page(proxy_id: int, request: Request, db: Session = Depends(get_db)):
+    require_user(request, db)
+    proxy = db.scalar(
+        select(Proxy).options(joinedload(Proxy.server)).where(Proxy.id == proxy_id)
+    )
+    if not proxy:
+        raise HTTPException(404)
+    try:
+        logs = await proxy_logs(proxy.server, proxy, lines=250)
+    except Exception as exc:
+        logs = f"Could not load logs: {exc}"
+    return templates.TemplateResponse(
+        "proxy_logs.html",
+        context(request, proxy=proxy, logs=logs),
+    )
+
+
+@app.post("/proxies/{proxy_id}/actions/{action}")
 async def proxy_action(proxy_id: int, action: str, request: Request, db: Session = Depends(get_db)):
     await require_csrf(request)
     require_user(request, db)
@@ -555,7 +828,6 @@ def proxy_qr(proxy_id: int, request: Request, db: Session = Depends(get_db)):
     proxy = db.get(Proxy, proxy_id)
     if not proxy:
         raise HTTPException(404)
-    from .security import decrypt_text
     link = proxy_links(proxy.public_host, proxy.public_port, decrypt_text(proxy.secret_enc), proxy.padding_enabled)["https"]
     img = qrcode.make(link)
     buf = io.BytesIO()
@@ -570,7 +842,6 @@ def public_share(slug: str, request: Request, db: Session = Depends(get_db)):
     )
     if not proxy:
         raise HTTPException(404)
-    from .security import decrypt_text
     links = proxy_links(proxy.public_host, proxy.public_port, decrypt_text(proxy.secret_enc), proxy.padding_enabled)
     return templates.TemplateResponse(
         "share.html",
@@ -588,9 +859,9 @@ def api_proxies(request: Request, db: Session = Depends(get_db)):
     if not settings.api_token:
         raise HTTPException(404)
     auth = request.headers.get("Authorization", "")
-    if auth != f"Bearer {settings.api_token}":
+    expected = f"Bearer {settings.api_token}"
+    if len(auth) != len(expected) or not compare_digest(auth, expected):
         raise HTTPException(401)
-    from .security import decrypt_text
     items = []
     for proxy in db.scalars(select(Proxy).options(joinedload(Proxy.server), joinedload(Proxy.sponsor))).all():
         links = proxy_links(proxy.public_host, proxy.public_port, decrypt_text(proxy.secret_enc), proxy.padding_enabled)

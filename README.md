@@ -82,3 +82,13 @@ Authorization: Bearer YOUR_TOKEN
 - `SECRET_KEY` یا `ENCRYPTION_KEY` بدون برنامه مهاجرت تغییر نکند.
 
 MTProxy محتوای پیام Telegram را رمزگشایی نمی‌کند، اما Node در لایه شبکه IP و زمان اتصال را می‌بیند؛ لاگ‌گیری حداقلی توصیه می‌شود.
+
+
+## مدیریت پیشرفته
+
+- ویرایش Host، Port، Workers، Padding و Sponsor بدون حذف Proxy
+- بررسی تداخل Public/Stats Port بین همه Instanceهای یک Node
+- Rotate Secret با تلاش خودکار برای بازگردانی Secret قبلی در صورت شکست Deploy
+- تغییر Proxy Tag اسپانسر و Redeploy پروکسی‌های متصل
+- Diagnostics سرور شامل load، RAM، disk، سرویس‌ها و listening ports
+- Journal Logs هر Proxy با Redact کردن Secret

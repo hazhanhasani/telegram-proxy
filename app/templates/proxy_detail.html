@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block title %}{{ proxy.name }} | {{ app_name }}{% endblock %}
+{% block heading %}مدیریت {{ proxy.name }}{% endblock %}
+{% block content %}
+<div class="details-grid">
+<section class="card">
+  <div class="card-head"><div><div class="eyebrow">Configuration</div><h2>تنظیمات Proxy</h2><p>{{ proxy.server.name }} · {{ proxy.slug }}</p></div><span class="badge {{ proxy.state }}">{{ proxy.state }}</span></div>
+  <form method="post" action="/proxies/{{ proxy.id }}/update" class="form-grid">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label>نام<input name="name" value="{{ proxy.name }}" required></label>
+    <label>Public Host<input name="public_host" value="{{ proxy.public_host }}" required></label>
+    <label>Public Port<input name="public_port" type="number" min="1" max="65535" value="{{ proxy.public_port }}" required></label>
+    <label>Stats Port<input name="stats_port" type="number" min="1" max="65535" value="{{ proxy.stats_port }}" required></label>
+    <label>Workers<input name="workers" type="number" min="1" max="64" value="{{ proxy.workers }}" required></label>
+    <label>اسپانسر<select name="sponsor_id"><option value="">بدون اسپانسر</option>{% for sponsor in sponsors %}<option value="{{ sponsor.id }}" {% if proxy.sponsor_id == sponsor.id %}selected{% endif %}>{{ sponsor.name }} {{ sponsor.channel }}</option>{% endfor %}</select></label>
+    <label class="check"><input name="padding_enabled" type="checkbox" value="1" {% if proxy.padding_enabled %}checked{% endif %}><span>Random Padding</span></label>
+    <div class="form-actions"><button class="btn primary" type="submit">ذخیره و Redeploy</button></div>
+  </form>
+</section>
+
+<aside>
+<section class="card"><div class="eyebrow">Access</div><h2>لینک اتصال</h2><div class="linkbox mono">{{ links.https }}</div>
+  <div class="toolbar"><button type="button" class="btn tiny" data-copy="{{ links.https }}">کپی لینک</button><a class="btn tiny ghost" href="/proxies/{{ proxy.id }}/qr">QR</a><a class="btn tiny ghost" href="/share/{{ proxy.slug }}" target="_blank">Share</a><a class="btn tiny ghost" href="/proxies/{{ proxy.id }}/logs">Logs</a></div>
+</section>
+<section class="card"><div class="eyebrow">Runtime</div><h2>کنترل سرویس</h2>
+  <div class="kv"><span>State</span><strong>{{ proxy.state }}</strong><span>Connections</span><strong>{{ proxy.current_connections }}</strong><span>Last check</span><strong>{{ proxy.last_checked or '—' }}</strong><span>Sponsor</span><strong>{{ proxy.sponsor.name if proxy.sponsor else '—' }}</strong></div>
+  <div class="toolbar" style="margin-top:14px"><form method="post" action="/proxies/{{ proxy.id }}/actions/start"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="btn tiny">Start</button></form><form method="post" action="/proxies/{{ proxy.id }}/actions/restart"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="btn tiny ghost">Restart</button></form><form method="post" action="/proxies/{{ proxy.id }}/actions/redeploy"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="btn tiny ghost">Redeploy</button></form><form method="post" action="/proxies/{{ proxy.id }}/actions/stop"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="btn tiny warning">Stop</button></form></div>
+</section>
+<section class="card"><div class="eyebrow">Security</div><h2>Rotate Secret</h2><p class="secret-warning">با Rotate، لینک قبلی بلافاصله از اعتبار می‌افتد. اگر Deploy جدید شکست بخورد، پنل تلاش می‌کند Secret قبلی را برگرداند.</p><form method="post" action="/proxies/{{ proxy.id }}/rotate-secret" data-confirm="Secret عوض شود؟ لینک قبلی از کار خواهد افتاد."><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="btn danger wide">Rotate Secret</button></form></section>
+<section class="card"><div class="eyebrow">Danger Zone</div><h2>حذف Proxy</h2><form method="post" action="/proxies/{{ proxy.id }}/delete" data-confirm="سرویس از Node و رکورد پنل برای همیشه حذف شود؟"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="btn danger wide">حذف کامل</button></form></section>
+</aside>
+</div>
+{% endblock %}
