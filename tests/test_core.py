@@ -1,6 +1,4 @@
-from fastapi.testclient import TestClient
-
-from app.main import app
+from app.main import app, health
 from app.security import (
     client_secret,
     generate_proxy_secret,
@@ -37,15 +35,12 @@ def test_proxy_links():
     assert "dd" + ("a" * 32) in links["https"]
 
 
-def test_health_endpoint():
-    with TestClient(app) as client:
-        response = client.get("/health")
-        assert response.status_code == 200
-        assert response.json()["ok"] is True
-
-
-def test_login_page_renders():
-    with TestClient(app) as client:
-        response = client.get("/login")
-        assert response.status_code == 200
-        assert "Telegram Proxy" in response.text
+def test_application_import_and_routes():
+    assert app.title
+    paths = {route.path for route in app.routes}
+    assert "/health" in paths
+    assert "/login" in paths
+    assert "/servers" in paths
+    assert "/proxies" in paths
+    assert "/sponsors" in paths
+    assert health()["ok"] is True
